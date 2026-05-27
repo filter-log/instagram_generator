@@ -183,6 +183,38 @@ input[type="range"] {
   accent-color: var(--accent);
 }
 
+.background-adjuster {
+  grid-template-columns: 1fr;
+}
+
+.background-editor {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3108 / 1350;
+  min-height: 126px;
+  border: 1px solid #c8ced8;
+  border-radius: 8px;
+  background: #eef0f4;
+  cursor: grab;
+  touch-action: none;
+}
+
+.background-editor.is-empty {
+  cursor: not-allowed;
+}
+
+.background-editor.is-dragging {
+  cursor: grabbing;
+}
+
+.background-reset {
+  justify-self: end;
+  width: 92px;
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
 .actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -314,13 +346,10 @@ button:disabled {
 .output-item img {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 5;
+  height: auto;
+  aspect-ratio: var(--preview-ratio, 4 / 5);
   object-fit: cover;
   background: #eef0f4;
-}
-
-.output-item.square img {
-  aspect-ratio: 1 / 1;
 }
 
 .output-meta {
@@ -392,6 +421,10 @@ button:disabled {
 
   .actions {
     grid-template-columns: 1fr;
+  }
+
+  .background-reset {
+    width: 100%;
   }
 
   .workspace {

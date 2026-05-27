@@ -15,9 +15,14 @@ const BOTTOM_PLACEMENTS = [
 ];
 const FONT_FAMILY_REGULAR = "NanumGothicFeed";
 const FONT_FAMILY_BOLD = "NanumGothicFeedBold";
+const DEFAULT_BACKGROUND_FOCUS = { x: 0.5, y: 0.5 };
+const LIVE_UPDATE_DELAY_MS = 120;
 
 const elements = {
   form: document.querySelector("#generator-form"),
+  backgroundInput: document.querySelector("#background"),
+  backgroundEditor: document.querySelector("#background-editor"),
+  resetBackgroundButton: document.querySelector("#reset-background-button"),
   status: document.querySelector("#status"),
   results: document.querySelector("#results"),
   outputCount: document.querySelector("#output-count"),
@@ -28,6 +33,14 @@ const elements = {
 const state = {
   guide: null,
   logo: null,
+  inputImages: null,
+  options: null,
+  editorBackgroundImage: null,
+  backgroundFocus: { ...DEFAULT_BACKGROUND_FOCUS },
+  dragState: null,
+  isGenerating: false,
+  pendingLiveUpdate: null,
+  liveUpdateTimer: 0,
   outputs: [],
   zipFilename: "instagram-feed-images.zip",
 };
@@ -36,8 +49,18 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   renderEmptyState();
+  renderBackgroundEditor();
   elements.form.addEventListener("submit", handleGenerate);
+  elements.form.addEventListener("input", handleFormEdit);
+  elements.form.addEventListener("change", handleFormEdit);
+  elements.backgroundInput.addEventListener("change", handleBackgroundInputChange);
+  elements.backgroundEditor.addEventListener("pointerdown", handleBackgroundPointerDown);
+  elements.backgroundEditor.addEventListener("pointermove", handleBackgroundPointerMove);
+  elements.backgroundEditor.addEventListener("pointerup", handleBackgroundPointerEnd);
+  elements.backgroundEditor.addEventListener("pointercancel", handleBackgroundPointerEnd);
+  elements.resetBackgroundButton.addEventListener("click", resetBackgroundPosition);
   elements.downloadButton.addEventListener("click", handleDownloadZip);
+  window.addEventListener("resize", renderBackgroundEditor);
 
   try {
     setStatus("Loading assets");
@@ -49,6 +72,7 @@ async function init() {
     state.guide = guide;
     state.logo = logo;
     document.querySelector("#blur").value = String(guide.background_blur_radius);
+    renderBackgroundEditor();
     setStatus("Ready", "success");
   } catch (error) {
     setStatus(error.message || "Failed to load assets", "error");
@@ -58,40 +82,44 @@ async function init() {
 
 async function handleGenerate(event) {
   event.preventDefault();
-  clearOutputs();
-  setBusy(true);
+  await regenerateOutputs({ clearBeforeGenerate: true, reloadImages: true });
+}
 
-  try {
-    const formData = new FormData(elements.form);
-    const format = formData.get("format");
-    const options = {
-      location: String(formData.get("location") || ""),
-      date: String(formData.get("date") || ""),
-      format,
-      quality: Number(formData.get("quality") || 95) / 100,
-      blurRadius: Number(formData.get("blur") || state.guide.background_blur_radius),
-      saveTopCanvas: formData.has("saveTopCanvas"),
+async function regenerateOutputs({ clearBeforeGenerate, reloadImages }) {
+  if (state.isGenerating) {
+    state.pendingLiveUpdate = {
+      reloadImages: Boolean(state.pendingLiveUpdate?.reloadImages || reloadImages),
     };
+    return;
+  }
+
+  if (clearBeforeGenerate) {
+    clearOutputs();
+  }
+
+  state.isGenerating = true;
+  setBusy(true);
+  try {
+    const options = collectOptions();
     validateOptions(options);
     state.zipFilename = makeZipFilename(options.location, options.date);
 
-    setStatus("Loading images");
-    const images = {
-      background: await loadUploadImage(formData.get("background"), "Background"),
-      imageA: await loadUploadImage(formData.get("imageA"), "Image A"),
-      imageB: await loadUploadImage(formData.get("imageB"), "Image B"),
-      imageC: await loadUploadImage(formData.get("imageC"), "Image C"),
-    };
+    const images = await getInputImages({ reloadImages });
 
     setStatus("Generating");
-    state.outputs = await generateFeed(images, options);
-    renderOutputs(state.outputs);
+    const nextOutputs = await generateFeed(images, options);
+    replaceOutputs(nextOutputs);
+    state.options = options;
     setStatus(`${state.outputs.length} files generated`, "success");
   } catch (error) {
-    renderEmptyState();
+    if (clearBeforeGenerate || !state.outputs.length) {
+      renderEmptyState();
+    }
     setStatus(error.message || "Generation failed", "error");
   } finally {
+    state.isGenerating = false;
     setBusy(false);
+    flushPendingLiveUpdate();
   }
 }
 
@@ -105,7 +133,14 @@ async function generateFeed(images, options) {
   const topContext = topCanvas.getContext("2d");
   topContext.fillStyle = "#ffffff";
   topContext.fillRect(0, 0, topCanvas.width, topCanvas.height);
-  drawCoverImage(topContext, images.background, topCanvas.width, topCanvas.height, options.blurRadius);
+  drawCoverImage(
+    topContext,
+    images.background,
+    topCanvas.width,
+    topCanvas.height,
+    options.blurRadius,
+    options.backgroundFocus,
+  );
   drawLogo(topContext, guide);
   drawTopText(topContext, guide, options.location, options.date);
 
@@ -135,14 +170,41 @@ async function generateFeed(images, options) {
   return outputs;
 }
 
-function drawCoverImage(context, image, targetWidth, targetHeight, blurRadius) {
-  const sourceWidth = image.naturalWidth || image.width;
-  const sourceHeight = image.naturalHeight || image.height;
-  const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
-  const drawWidth = sourceWidth * scale;
-  const drawHeight = sourceHeight * scale;
-  const drawX = (targetWidth - drawWidth) / 2;
-  const drawY = (targetHeight - drawHeight) / 2;
+function collectOptions() {
+  const formData = new FormData(elements.form);
+  return {
+    location: String(formData.get("location") || ""),
+    date: String(formData.get("date") || ""),
+    format: formData.get("format"),
+    quality: Number(formData.get("quality") || 95) / 100,
+    blurRadius: Number(formData.get("blur") || state.guide.background_blur_radius),
+    saveTopCanvas: formData.has("saveTopCanvas"),
+    backgroundFocus: { ...state.backgroundFocus },
+  };
+}
+
+async function getInputImages({ reloadImages }) {
+  if (state.inputImages && !reloadImages) {
+    return state.inputImages;
+  }
+
+  setStatus("Loading images");
+  const formData = new FormData(elements.form);
+  const images = {
+    background: await loadUploadImage(formData.get("background"), "Background"),
+    imageA: await loadUploadImage(formData.get("imageA"), "Image A"),
+    imageB: await loadUploadImage(formData.get("imageB"), "Image B"),
+    imageC: await loadUploadImage(formData.get("imageC"), "Image C"),
+  };
+  state.inputImages = images;
+  state.editorBackgroundImage = images.background;
+  elements.resetBackgroundButton.disabled = false;
+  renderBackgroundEditor();
+  return images;
+}
+
+function drawCoverImage(context, image, targetWidth, targetHeight, blurRadius, focus = DEFAULT_BACKGROUND_FOCUS) {
+  const metrics = getCoverMetrics(image, targetWidth, targetHeight, focus);
   const blur = Math.max(0, Number(blurRadius) || 0);
   const pad = Math.ceil(blur * 4);
 
@@ -150,7 +212,193 @@ function drawCoverImage(context, image, targetWidth, targetHeight, blurRadius) {
   if (blur > 0) {
     context.filter = `blur(${blur}px)`;
   }
-  context.drawImage(image, drawX - pad, drawY - pad, drawWidth + pad * 2, drawHeight + pad * 2);
+  context.drawImage(
+    image,
+    metrics.drawX - pad,
+    metrics.drawY - pad,
+    metrics.drawWidth + pad * 2,
+    metrics.drawHeight + pad * 2,
+  );
+  context.restore();
+}
+
+function getCoverMetrics(image, targetWidth, targetHeight, focus = DEFAULT_BACKGROUND_FOCUS) {
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  return {
+    drawWidth,
+    drawHeight,
+    drawX: (targetWidth - drawWidth) * clamp(focus.x, 0, 1),
+    drawY: (targetHeight - drawHeight) * clamp(focus.y, 0, 1),
+  };
+}
+
+async function handleBackgroundInputChange() {
+  state.inputImages = null;
+  state.backgroundFocus = { ...DEFAULT_BACKGROUND_FOCUS };
+  elements.resetBackgroundButton.disabled = true;
+
+  const file = elements.backgroundInput.files?.[0];
+  if (!file) {
+    state.editorBackgroundImage = null;
+    renderBackgroundEditor();
+    return;
+  }
+
+  try {
+    state.editorBackgroundImage = await loadUploadImage(file, "Background");
+    elements.resetBackgroundButton.disabled = false;
+    renderBackgroundEditor();
+    scheduleLiveRegenerate({ reloadImages: true });
+  } catch (error) {
+    state.editorBackgroundImage = null;
+    renderBackgroundEditor();
+    setStatus(error.message || "Could not load background", "error");
+  }
+}
+
+function handleFormEdit(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || target === elements.backgroundInput) {
+    return;
+  }
+
+  const reloadImages = target.matches("input[type='file']");
+  if (reloadImages) {
+    state.inputImages = null;
+  }
+
+  renderBackgroundEditor();
+  scheduleLiveRegenerate({ reloadImages });
+}
+
+function handleBackgroundPointerDown(event) {
+  if (!state.editorBackgroundImage) {
+    return;
+  }
+
+  elements.backgroundEditor.setPointerCapture(event.pointerId);
+  elements.backgroundEditor.classList.add("is-dragging");
+  state.dragState = {
+    pointerId: event.pointerId,
+    lastX: event.clientX,
+    lastY: event.clientY,
+  };
+}
+
+function handleBackgroundPointerMove(event) {
+  if (!state.dragState || state.dragState.pointerId !== event.pointerId || !state.editorBackgroundImage) {
+    return;
+  }
+
+  const rect = elements.backgroundEditor.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return;
+  }
+  const deltaX = (event.clientX - state.dragState.lastX) * TOP_CANVAS_SIZE.width / rect.width;
+  const deltaY = (event.clientY - state.dragState.lastY) * TOP_CANVAS_SIZE.height / rect.height;
+  state.dragState.lastX = event.clientX;
+  state.dragState.lastY = event.clientY;
+
+  moveBackgroundBy(deltaX, deltaY);
+  renderBackgroundEditor();
+  scheduleLiveRegenerate({ reloadImages: false });
+}
+
+function handleBackgroundPointerEnd(event) {
+  if (state.dragState?.pointerId !== event.pointerId) {
+    return;
+  }
+
+  elements.backgroundEditor.classList.remove("is-dragging");
+  state.dragState = null;
+}
+
+function resetBackgroundPosition() {
+  state.backgroundFocus = { ...DEFAULT_BACKGROUND_FOCUS };
+  renderBackgroundEditor();
+  scheduleLiveRegenerate({ reloadImages: false });
+}
+
+function moveBackgroundBy(deltaX, deltaY) {
+  const metrics = getCoverMetrics(
+    state.editorBackgroundImage,
+    TOP_CANVAS_SIZE.width,
+    TOP_CANVAS_SIZE.height,
+    state.backgroundFocus,
+  );
+  const rangeX = TOP_CANVAS_SIZE.width - metrics.drawWidth;
+  const rangeY = TOP_CANVAS_SIZE.height - metrics.drawHeight;
+
+  if (rangeX !== 0) {
+    state.backgroundFocus.x = clamp(state.backgroundFocus.x + deltaX / rangeX, 0, 1);
+  }
+  if (rangeY !== 0) {
+    state.backgroundFocus.y = clamp(state.backgroundFocus.y + deltaY / rangeY, 0, 1);
+  }
+}
+
+function renderBackgroundEditor() {
+  const canvas = elements.backgroundEditor;
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(rect.width || canvas.clientWidth || 920));
+  const cssHeight = Math.round(cssWidth * TOP_CANVAS_SIZE.height / TOP_CANVAS_SIZE.width);
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(cssWidth * pixelRatio);
+  canvas.height = Math.round(cssHeight * pixelRatio);
+
+  const context = canvas.getContext("2d");
+  context.setTransform(canvas.width / TOP_CANVAS_SIZE.width, 0, 0, canvas.height / TOP_CANVAS_SIZE.height, 0, 0);
+  context.clearRect(0, 0, TOP_CANVAS_SIZE.width, TOP_CANVAS_SIZE.height);
+  context.fillStyle = "#eef0f4";
+  context.fillRect(0, 0, TOP_CANVAS_SIZE.width, TOP_CANVAS_SIZE.height);
+
+  canvas.classList.toggle("is-empty", !state.editorBackgroundImage);
+  if (!state.editorBackgroundImage) {
+    return;
+  }
+
+  const guide = state.guide ? normalizeGuide(state.guide) : null;
+  const blurInput = document.querySelector("#blur");
+  const locationInput = document.querySelector("#location");
+  const dateInput = document.querySelector("#date");
+  const blurRadius = Number(blurInput?.value || guide?.backgroundBlurRadius || 0);
+
+  drawCoverImage(
+    context,
+    state.editorBackgroundImage,
+    TOP_CANVAS_SIZE.width,
+    TOP_CANVAS_SIZE.height,
+    blurRadius,
+    state.backgroundFocus,
+  );
+
+  if (guide && state.logo) {
+    drawLogo(context, guide);
+    drawTopText(
+      context,
+      guide,
+      locationInput?.value || "",
+      dateInput?.value || "",
+    );
+  }
+  drawEditorGuides(context);
+}
+
+function drawEditorGuides(context) {
+  context.save();
+  context.lineWidth = 4;
+  context.strokeStyle = "rgba(255, 255, 255, .86)";
+  context.setLineDash([]);
+  for (const crop of TOP_CROPS) {
+    context.strokeRect(crop.x + 2, crop.y + 2, crop.width - 4, crop.height - 4);
+  }
+  context.strokeStyle = "rgba(23, 105, 224, .86)";
+  context.setLineDash([18, 14]);
+  context.strokeRect(SQUARE_CROP.x + 2, SQUARE_CROP.y + 2, SQUARE_CROP.width - 4, SQUARE_CROP.height - 4);
   context.restore();
 }
 
@@ -528,6 +776,33 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
+function scheduleLiveRegenerate({ reloadImages }) {
+  if (!state.outputs.length) {
+    return;
+  }
+
+  window.clearTimeout(state.liveUpdateTimer);
+  state.liveUpdateTimer = window.setTimeout(() => {
+    regenerateOutputs({ clearBeforeGenerate: false, reloadImages });
+  }, LIVE_UPDATE_DELAY_MS);
+}
+
+function flushPendingLiveUpdate() {
+  if (!state.pendingLiveUpdate) {
+    return;
+  }
+
+  const pending = state.pendingLiveUpdate;
+  state.pendingLiveUpdate = null;
+  scheduleLiveRegenerate({ reloadImages: pending.reloadImages });
+}
+
+function replaceOutputs(outputs) {
+  revokeOutputUrls(state.outputs);
+  state.outputs = outputs;
+  renderOutputs(state.outputs);
+}
+
 function renderOutputs(outputs) {
   elements.results.textContent = "";
   const fragment = document.createDocumentFragment();
@@ -580,6 +855,7 @@ function createOutputSection(title, count, outputs, gridClassName) {
 function createOutputItem(output) {
   const figure = document.createElement("figure");
   figure.className = `output-item${output.width === output.height ? " square" : ""}`;
+  figure.style.setProperty("--preview-ratio", `${output.width} / ${output.height}`);
 
   const image = document.createElement("img");
   image.src = output.url;
@@ -614,11 +890,15 @@ function renderEmptyState() {
 }
 
 function clearOutputs() {
-  for (const output of state.outputs) {
-    URL.revokeObjectURL(output.url);
-  }
+  revokeOutputUrls(state.outputs);
   state.outputs = [];
   renderEmptyState();
+}
+
+function revokeOutputUrls(outputs) {
+  for (const output of outputs) {
+    URL.revokeObjectURL(output.url);
+  }
 }
 
 function setBusy(isBusy) {
@@ -662,4 +942,8 @@ function sanitizeFilenamePart(value) {
 
 function formatFileCount(count) {
   return `${count} ${count === 1 ? "file" : "files"}`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
