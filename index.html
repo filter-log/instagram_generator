@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Instagram Feed Generator</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="assets/logo.png" alt="" aria-hidden="true">
+      <h1>Instagram Feed Generator</h1>
+    </div>
+    <p id="status" class="status" role="status">Loading assets</p>
+  </header>
+
+  <main class="app-shell">
+    <section class="controls" aria-label="Generator controls">
+      <form id="generator-form">
+        <fieldset>
+          <legend>Images</legend>
+
+          <label for="background">Background</label>
+          <input id="background" name="background" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" required>
+
+          <label for="image-a">Image A</label>
+          <input id="image-a" name="imageA" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" required>
+
+          <label for="image-b">Image B</label>
+          <input id="image-b" name="imageB" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" required>
+
+          <label for="image-c">Image C</label>
+          <input id="image-c" name="imageC" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" required>
+        </fieldset>
+
+        <fieldset>
+          <legend>Text</legend>
+
+          <label for="location">Location</label>
+          <input id="location" name="location" type="text" autocomplete="off" required>
+
+          <label for="date">Date</label>
+          <input id="date" name="date" type="text" autocomplete="off" required>
+        </fieldset>
+
+        <fieldset>
+          <legend>Output</legend>
+
+          <label for="format">Format</label>
+          <select id="format" name="format">
+            <option value="jpg" selected>JPG</option>
+            <option value="png">PNG</option>
+          </select>
+
+          <label for="quality">JPG Quality</label>
+          <input id="quality" name="quality" type="range" min="70" max="100" value="95">
+
+          <label for="blur">Background Blur</label>
+          <input id="blur" name="blur" type="number" min="0" max="40" step="0.5" value="2.5">
+
+          <label class="check-row" for="save-top-canvas">
+            <input id="save-top-canvas" name="saveTopCanvas" type="checkbox">
+            <span>Save 3108x1350</span>
+          </label>
+        </fieldset>
+
+        <div class="actions">
+          <button id="generate-button" type="submit">Generate</button>
+          <button id="download-button" type="button" disabled>Download ZIP</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="workspace" aria-label="Generated images">
+      <div class="workspace-head">
+        <h2>Output</h2>
+        <span id="output-count">0 files</span>
+      </div>
+      <div id="results" class="results" aria-live="polite"></div>
+    </section>
+  </main>
+</body>
+</html>
