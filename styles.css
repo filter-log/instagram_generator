@@ -207,6 +207,25 @@ input[type="range"] {
   cursor: grabbing;
 }
 
+.background-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 10px 12px;
+  align-items: center;
+}
+
+.background-tools label {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.background-tools label span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .background-reset {
   justify-self: end;
   width: 92px;
@@ -425,6 +444,10 @@ button:disabled {
 
   .background-reset {
     width: 100%;
+  }
+
+  .background-tools {
+    grid-template-columns: 1fr;
   }
 
   .workspace {

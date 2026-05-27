@@ -38,7 +38,11 @@
         <fieldset class="background-adjuster">
           <legend>Background Position</legend>
           <canvas id="background-editor" class="background-editor" width="920" height="400" aria-label="Background position"></canvas>
-          <button id="reset-background-button" class="background-reset" type="button" disabled>Reset</button>
+          <div class="background-tools">
+            <label for="background-zoom">Zoom <span id="background-zoom-value">100%</span></label>
+            <input id="background-zoom" name="backgroundZoom" type="range" min="100" max="250" step="5" value="100">
+            <button id="reset-background-button" class="background-reset" type="button" disabled>Reset</button>
+          </div>
         </fieldset>
 
         <fieldset>

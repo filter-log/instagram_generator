@@ -16,12 +16,15 @@ const BOTTOM_PLACEMENTS = [
 const FONT_FAMILY_REGULAR = "NanumGothicFeed";
 const FONT_FAMILY_BOLD = "NanumGothicFeedBold";
 const DEFAULT_BACKGROUND_FOCUS = { x: 0.5, y: 0.5 };
+const DEFAULT_BACKGROUND_ZOOM = 1;
 const LIVE_UPDATE_DELAY_MS = 120;
 
 const elements = {
   form: document.querySelector("#generator-form"),
   backgroundInput: document.querySelector("#background"),
   backgroundEditor: document.querySelector("#background-editor"),
+  backgroundZoom: document.querySelector("#background-zoom"),
+  backgroundZoomValue: document.querySelector("#background-zoom-value"),
   resetBackgroundButton: document.querySelector("#reset-background-button"),
   status: document.querySelector("#status"),
   results: document.querySelector("#results"),
@@ -37,6 +40,7 @@ const state = {
   options: null,
   editorBackgroundImage: null,
   backgroundFocus: { ...DEFAULT_BACKGROUND_FOCUS },
+  backgroundZoom: DEFAULT_BACKGROUND_ZOOM,
   dragState: null,
   isGenerating: false,
   pendingLiveUpdate: null,
@@ -50,6 +54,7 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   renderEmptyState();
   renderBackgroundEditor();
+  updateZoomDisplay();
   elements.form.addEventListener("submit", handleGenerate);
   elements.form.addEventListener("input", handleFormEdit);
   elements.form.addEventListener("change", handleFormEdit);
@@ -140,6 +145,7 @@ async function generateFeed(images, options) {
     topCanvas.height,
     options.blurRadius,
     options.backgroundFocus,
+    options.backgroundZoom,
   );
   drawLogo(topContext, guide);
   drawTopText(topContext, guide, options.location, options.date);
@@ -180,6 +186,7 @@ function collectOptions() {
     blurRadius: Number(formData.get("blur") || state.guide.background_blur_radius),
     saveTopCanvas: formData.has("saveTopCanvas"),
     backgroundFocus: { ...state.backgroundFocus },
+    backgroundZoom: state.backgroundZoom,
   };
 }
 
@@ -203,8 +210,16 @@ async function getInputImages({ reloadImages }) {
   return images;
 }
 
-function drawCoverImage(context, image, targetWidth, targetHeight, blurRadius, focus = DEFAULT_BACKGROUND_FOCUS) {
-  const metrics = getCoverMetrics(image, targetWidth, targetHeight, focus);
+function drawCoverImage(
+  context,
+  image,
+  targetWidth,
+  targetHeight,
+  blurRadius,
+  focus = DEFAULT_BACKGROUND_FOCUS,
+  zoom = DEFAULT_BACKGROUND_ZOOM,
+) {
+  const metrics = getCoverMetrics(image, targetWidth, targetHeight, focus, zoom);
   const blur = Math.max(0, Number(blurRadius) || 0);
   const pad = Math.ceil(blur * 4);
 
@@ -222,10 +237,16 @@ function drawCoverImage(context, image, targetWidth, targetHeight, blurRadius, f
   context.restore();
 }
 
-function getCoverMetrics(image, targetWidth, targetHeight, focus = DEFAULT_BACKGROUND_FOCUS) {
+function getCoverMetrics(
+  image,
+  targetWidth,
+  targetHeight,
+  focus = DEFAULT_BACKGROUND_FOCUS,
+  zoom = DEFAULT_BACKGROUND_ZOOM,
+) {
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
-  const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight) * Math.max(1, zoom);
   const drawWidth = sourceWidth * scale;
   const drawHeight = sourceHeight * scale;
   return {
@@ -239,6 +260,9 @@ function getCoverMetrics(image, targetWidth, targetHeight, focus = DEFAULT_BACKG
 async function handleBackgroundInputChange() {
   state.inputImages = null;
   state.backgroundFocus = { ...DEFAULT_BACKGROUND_FOCUS };
+  state.backgroundZoom = DEFAULT_BACKGROUND_ZOOM;
+  elements.backgroundZoom.value = String(DEFAULT_BACKGROUND_ZOOM * 100);
+  updateZoomDisplay();
   elements.resetBackgroundButton.disabled = true;
 
   const file = elements.backgroundInput.files?.[0];
@@ -264,6 +288,11 @@ function handleFormEdit(event) {
   const target = event.target;
   if (!(target instanceof HTMLElement) || target === elements.backgroundInput) {
     return;
+  }
+
+  if (target === elements.backgroundZoom) {
+    state.backgroundZoom = Number(elements.backgroundZoom.value) / 100;
+    updateZoomDisplay();
   }
 
   const reloadImages = target.matches("input[type='file']");
@@ -319,6 +348,9 @@ function handleBackgroundPointerEnd(event) {
 
 function resetBackgroundPosition() {
   state.backgroundFocus = { ...DEFAULT_BACKGROUND_FOCUS };
+  state.backgroundZoom = DEFAULT_BACKGROUND_ZOOM;
+  elements.backgroundZoom.value = String(DEFAULT_BACKGROUND_ZOOM * 100);
+  updateZoomDisplay();
   renderBackgroundEditor();
   scheduleLiveRegenerate({ reloadImages: false });
 }
@@ -329,6 +361,7 @@ function moveBackgroundBy(deltaX, deltaY) {
     TOP_CANVAS_SIZE.width,
     TOP_CANVAS_SIZE.height,
     state.backgroundFocus,
+    state.backgroundZoom,
   );
   const rangeX = TOP_CANVAS_SIZE.width - metrics.drawWidth;
   const rangeY = TOP_CANVAS_SIZE.height - metrics.drawHeight;
@@ -374,6 +407,7 @@ function renderBackgroundEditor() {
     TOP_CANVAS_SIZE.height,
     blurRadius,
     state.backgroundFocus,
+    state.backgroundZoom,
   );
 
   if (guide && state.logo) {
@@ -391,12 +425,16 @@ function renderBackgroundEditor() {
 function drawEditorGuides(context) {
   context.save();
   context.lineWidth = 4;
-  context.strokeStyle = "rgba(255, 255, 255, .86)";
+  context.shadowColor = "rgba(0, 0, 0, .72)";
+  context.shadowBlur = 12;
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 3;
+  context.strokeStyle = "rgba(255, 255, 255, .94)";
   context.setLineDash([]);
   for (const crop of TOP_CROPS) {
     context.strokeRect(crop.x + 2, crop.y + 2, crop.width - 4, crop.height - 4);
   }
-  context.strokeStyle = "rgba(23, 105, 224, .86)";
+  context.strokeStyle = "rgba(255, 213, 74, .96)";
   context.setLineDash([18, 14]);
   context.strokeRect(SQUARE_CROP.x + 2, SQUARE_CROP.y + 2, SQUARE_CROP.width - 4, SQUARE_CROP.height - 4);
   context.restore();
@@ -910,6 +948,10 @@ function setStatus(message, tone) {
   elements.status.textContent = message;
   elements.status.classList.toggle("is-error", tone === "error");
   elements.status.classList.toggle("is-success", tone === "success");
+}
+
+function updateZoomDisplay() {
+  elements.backgroundZoomValue.textContent = `${Math.round(state.backgroundZoom * 100)}%`;
 }
 
 function downloadBlob(blob, filename) {
