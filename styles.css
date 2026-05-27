@@ -54,12 +54,11 @@ select {
 }
 
 .brand img {
-  width: 72px;
-  height: auto;
+  width: 126px;
+  height: 36px;
   flex: 0 0 auto;
-  padding: 7px;
-  border-radius: 6px;
-  background: #1d232d;
+  object-fit: cover;
+  object-position: 50% 43%;
 }
 
 h1,
@@ -427,7 +426,8 @@ button:disabled {
 
 @media (max-width: 520px) {
   .brand img {
-    width: 54px;
+    width: 105px;
+    height: 30px;
   }
 
   form {
