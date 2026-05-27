@@ -29,6 +29,7 @@ const state = {
   guide: null,
   logo: null,
   outputs: [],
+  zipFilename: "instagram-feed-images.zip",
 };
 
 document.addEventListener("DOMContentLoaded", init);
@@ -72,6 +73,7 @@ async function handleGenerate(event) {
       saveTopCanvas: formData.has("saveTopCanvas"),
     };
     validateOptions(options);
+    state.zipFilename = makeZipFilename(options.location, options.date);
 
     setStatus("Loading images");
     const images = {
@@ -403,7 +405,7 @@ async function handleDownloadZip() {
   setStatus("Preparing ZIP");
   try {
     const zipBlob = await createZip(state.outputs);
-    downloadBlob(zipBlob, "instagram-feed-images.zip");
+    downloadBlob(zipBlob, state.zipFilename);
     setStatus("ZIP ready", "success");
   } catch (error) {
     setStatus(error.message || "Could not create ZIP", "error");
@@ -529,36 +531,76 @@ const CRC_TABLE = (() => {
 function renderOutputs(outputs) {
   elements.results.textContent = "";
   const fragment = document.createDocumentFragment();
+  const feedOutputs = outputs.filter((output) => /^0[1-6]_/.test(output.filename));
+  const squareOutputs = outputs.filter((output) => output.filename.startsWith("square_1350."));
+  const extraOutputs = outputs.filter((output) => (
+    !feedOutputs.includes(output) && !squareOutputs.includes(output)
+  ));
 
-  for (const output of outputs) {
-    const figure = document.createElement("figure");
-    figure.className = `output-item${output.width === output.height ? " square" : ""}`;
-
-    const image = document.createElement("img");
-    image.src = output.url;
-    image.alt = output.filename;
-    image.width = output.width;
-    image.height = output.height;
-
-    const meta = document.createElement("figcaption");
-    meta.className = "output-meta";
-
-    const name = document.createElement("strong");
-    name.textContent = output.filename;
-
-    const link = document.createElement("a");
-    link.href = output.url;
-    link.download = output.filename;
-    link.textContent = "Download";
-
-    meta.append(name, link);
-    figure.append(image, meta);
-    fragment.append(figure);
+  if (feedOutputs.length) {
+    fragment.append(createOutputSection("Instagram Feed", formatFileCount(feedOutputs.length), feedOutputs, "feed-grid"));
+  }
+  if (squareOutputs.length) {
+    fragment.append(createOutputSection("Square Image", formatFileCount(squareOutputs.length), squareOutputs, "single-grid"));
+  }
+  if (extraOutputs.length) {
+    fragment.append(createOutputSection("Extra", formatFileCount(extraOutputs.length), extraOutputs, "extra-grid"));
   }
 
   elements.results.append(fragment);
-  elements.outputCount.textContent = `${outputs.length} files`;
+  elements.outputCount.textContent = formatFileCount(outputs.length);
   elements.downloadButton.disabled = outputs.length === 0;
+}
+
+function createOutputSection(title, count, outputs, gridClassName) {
+  const section = document.createElement("section");
+  section.className = "output-section";
+
+  const head = document.createElement("div");
+  head.className = "section-head";
+
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+
+  const countText = document.createElement("span");
+  countText.textContent = count;
+
+  const grid = document.createElement("div");
+  grid.className = `output-grid ${gridClassName}`;
+
+  for (const output of outputs) {
+    grid.append(createOutputItem(output));
+  }
+
+  head.append(heading, countText);
+  section.append(head, grid);
+  return section;
+}
+
+function createOutputItem(output) {
+  const figure = document.createElement("figure");
+  figure.className = `output-item${output.width === output.height ? " square" : ""}`;
+
+  const image = document.createElement("img");
+  image.src = output.url;
+  image.alt = output.filename;
+  image.width = output.width;
+  image.height = output.height;
+
+  const meta = document.createElement("figcaption");
+  meta.className = "output-meta";
+
+  const name = document.createElement("strong");
+  name.textContent = output.filename;
+
+  const link = document.createElement("a");
+  link.href = output.url;
+  link.download = output.filename;
+  link.textContent = "Download";
+
+  meta.append(name, link);
+  figure.append(image, meta);
+  return figure;
 }
 
 function renderEmptyState() {
@@ -567,7 +609,7 @@ function renderEmptyState() {
   empty.className = "empty-state";
   empty.textContent = "No output";
   elements.results.append(empty);
-  elements.outputCount.textContent = "0 files";
+  elements.outputCount.textContent = formatFileCount(0);
   elements.downloadButton.disabled = true;
 }
 
@@ -599,4 +641,25 @@ function downloadBlob(blob, filename) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function makeZipFilename(location, date) {
+  const parts = [location, date]
+    .map((part) => sanitizeFilenamePart(part))
+    .filter(Boolean);
+  const baseName = parts.length ? parts.join("_") : "instagram-feed-images";
+  return `${baseName}.zip`;
+}
+
+function sanitizeFilenamePart(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function formatFileCount(count) {
+  return `${count} ${count === 1 ? "file" : "files"}`;
 }
